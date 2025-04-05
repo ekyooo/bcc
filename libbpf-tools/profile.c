@@ -22,8 +22,15 @@
 #include "profile.skel.h"
 #include "trace_helpers.h"
 
+#ifdef USE_DWARF_UNWIND
+#include "unwind_helpers.h"
+#endif
+
 #define OPT_PERF_MAX_STACK_DEPTH	1 /* --perf-max-stack-depth */
 #define OPT_STACK_STORAGE_SIZE		2 /* --stack-storage-size */
+#ifdef USE_DWARF_UNWIND
+#define OPT_DWARF_STACK_SIZE		3 /* --dwarf-stack-size */
+#endif
 
 #define SYM_INFO_LEN			2048
 
@@ -80,6 +87,10 @@ static struct env {
 	bool include_idle;
 	int cpu;
 	bool folded;
+#ifdef USE_DWARF_UNWIND
+	bool dwarf_unwind;
+	int dwarf_ustack_size;
+#endif
 } env = {
 	.stack_storage_size = 1024,
 	.perf_max_stack_depth = 127,
@@ -87,6 +98,9 @@ static struct env {
 	.freq = 1,
 	.sample_freq = 49,
 	.cpu = -1,
+#ifdef USE_DWARF_UNWIND
+	.dwarf_ustack_size = 128,
+#endif
 };
 
 const char *argp_program_version = "profile 0.1";
@@ -123,6 +137,10 @@ static const struct argp_option opts[] = {
 	{ "cpu", 'C', "CPU", 0, "cpu number to run profile on", 0 },
 	{ "perf-max-stack-depth", OPT_PERF_MAX_STACK_DEPTH,
 	  "PERF-MAX-STACK-DEPTH", 0, "the limit for both kernel and user stack traces (default 127)", 0 },
+#ifdef USE_DWARF_UNWIND
+	{ "dwarf-unwind", 'D', NULL, 0, "Enable DWARF mode stack traces", 0 },
+	{ "dwarf-stack-size", OPT_DWARF_STACK_SIZE, "STACK-SIZE", 0, "Set user stack size for DWARF mode (default 128)", 0 },
+#endif
 	{ "verbose", 'v', NULL, 0, "Verbose debug output", 0 },
 	{ NULL, 'h', NULL, OPTION_HIDDEN, "Show the full help", 0 },
 	{},
@@ -202,6 +220,25 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	case 'f':
 		env.folded = true;
 		break;
+#ifdef USE_DWARF_UNWIND
+	case 'D':
+		env.dwarf_unwind = true;
+		break;
+	case OPT_DWARF_STACK_SIZE:
+		errno = 0;
+		env.dwarf_ustack_size = strtol(arg, NULL, 10);
+		if (errno) {
+			fprintf(stderr, "invalid stack size: %s\n", arg);
+			argp_usage(state);
+		}
+		if (env.dwarf_ustack_size > UW_STACK_MAX_SZ) {
+			fprintf(stderr, "the stack size is too big, please "
+				"increase UW_STACK_MAX_SZ's value and recompile");
+			argp_usage(state);
+		}
+
+		break;
+#endif
 	case OPT_PERF_MAX_STACK_DEPTH:
 		errno = 0;
 		env.perf_max_stack_depth = strtol(arg, NULL, 10);
@@ -324,6 +361,26 @@ static int read_counts_map(int fd, struct key_ext_t *items, __u32 *count)
 	return 0;
 }
 
+static int stack_map_lookup_elem(int sfd, int *stack_id, pid_t pid, unsigned long *ip, size_t ip_count)
+{
+#ifdef USE_DWARF_UNWIND
+	int err;
+
+	if (env.dwarf_unwind) {
+		err = uw_map_lookup_elem(pid, stack_id, ip, ip_count);
+		if (err == -ENOBUFS) {
+			fprintf(stderr, "WARNING: The stack trace could not be fully displayed "
+				"due to memory shorage. Consider increasing --perf-max-stack-depth.\n");
+			err = 0;
+		}
+		errno = -err;
+		return err;
+	}
+#endif
+
+	return bpf_map_lookup_elem(sfd, stack_id, ip);
+}
+
 static const char *ksymname(unsigned long addr)
 {
 	const struct ksym *ksym = ksyms__map_addr(ksyms, addr);
@@ -401,7 +458,8 @@ static bool print_user_stacktrace(struct key_t *event, int stack_map,
 	if (delim)
 		pr_format(f->delim, f);
 
-	if (bpf_map_lookup_elem(stack_map, &event->user_stack_id, ip) != 0) {
+	if (stack_map_lookup_elem(stack_map, (int*)&event->user_stack_id, event->pid, ip,
+				  env.perf_max_stack_depth)) {
 		pr_format("[Missed User Stack]", f);
 	} else {
 		syms = syms_cache__get_syms(syms_cache, event->pid);
@@ -616,6 +674,16 @@ int main(int argc, char **argv)
 	err = set_pidns(obj);
 	if (err && env.verbose)
 		fprintf(stderr, "failed to translate pidns: %s\n", strerror(-err));
+
+#ifdef USE_DWARF_UNWIND
+	if (env.dwarf_unwind) {
+		err = UW_MAP_SET(obj, env.dwarf_ustack_size, env.stack_storage_size);
+		if (err) {
+			fprintf(stderr, "failed to init DWARF unwinder: %s\n", strerror(-err));
+			goto cleanup;
+		}
+	}
+#endif
 
 	err = profile_bpf__load(obj);
 	if (err) {

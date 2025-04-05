@@ -11,6 +11,7 @@
 #include <bpf/bpf_tracing.h>
 #include "profile.h"
 #include "maps.bpf.h"
+#include "unwind_helpers.bpf.h"
 
 const volatile bool kernel_stacks_only = false;
 const volatile bool user_stacks_only = false;
@@ -85,11 +86,15 @@ int do_perf_event(struct bpf_perf_event_data *ctx)
 	else
 		key.kern_stack_id = bpf_get_stackid(&ctx->regs, &stackmap, 0);
 
-	if (kernel_stacks_only)
+	if (kernel_stacks_only) {
 		key.user_stack_id = -1;
-	else
-		key.user_stack_id = bpf_get_stackid(&ctx->regs, &stackmap,
-						    BPF_F_USER_STACK);
+	} else {
+		if (!dwarf_unwind)
+			key.user_stack_id = bpf_get_stackid(&ctx->regs, &stackmap,
+							    BPF_F_USER_STACK);
+		else
+			key.user_stack_id = uw_get_stackid();
+	}
 
 	valp = bpf_map_lookup_or_try_init(&counts, &key, &zero);
 	if (valp)

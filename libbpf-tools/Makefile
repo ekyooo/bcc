@@ -50,6 +50,7 @@ BZ_APPS = \
 UNW_APPS = \
 	memleak \
 	offcputime \
+	profile \
 	#
 
 APPS = \
