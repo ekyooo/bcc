@@ -127,17 +127,28 @@ pair of .c and .py files, and some are directories of files.
 
 ##### Performance and Time Tools
 
+###### Database Performance Tools
+
 - tools/[dbslower](tools/dbslower.py): Trace MySQL/PostgreSQL queries slower than a threshold. [Examples](tools/dbslower_example.txt).
 - tools/[dbstat](tools/dbstat.py): Summarize MySQL/PostgreSQL query latency as a histogram. [Examples](tools/dbstat_example.txt).
+- tools/[mysqld_qslower](tools/mysqld_qslower.py): Trace MySQL server queries slower than a threshold. [Examples](tools/mysqld_qslower_example.txt).
+
+###### Function Performance Tools
+
 - tools/[funcinterval](tools/funcinterval.py): Time interval between the same function as a histogram. [Examples](tools/funcinterval_example.txt).
 - tools/[funclatency](tools/funclatency.py): Time functions and show their latency distribution. [Examples](tools/funclatency_example.txt).
 - tools/[funcslower](tools/funcslower.py): Trace slow kernel or user function calls. [Examples](tools/funcslower_example.txt).
+
+###### Interrupt and System Call Tools
+
 - tools/[hardirqs](tools/hardirqs.py):  Measure hard IRQ (hard interrupt) event time. [Examples](tools/hardirqs_example.txt).
-- tools/[mysqld_qslower](tools/mysqld_qslower.py): Trace MySQL server queries slower than a threshold. [Examples](tools/mysqld_qslower_example.txt).
-- tools/[ppchcalls](tools/ppchcalls.py): Summarize ppc hcall counts and latencies. [Examples](tools/ppchcalls_example.txt).
 - tools/[softirqs](tools/softirqs.py):  Measure soft IRQ (soft interrupt) event time. [Examples](tools/softirqs_example.txt).
 - tools/[softirqslower](tools/softirqslower.py): Trace slow soft IRQ (interrupt). [Examples](tools/softirqslower_example.txt).
 - tools/[syscount](tools/syscount.py): Summarize syscall counts and latencies. [Examples](tools/syscount_example.txt).
+
+###### Platform-specific Tools
+
+- tools/[ppchcalls](tools/ppchcalls.py): Summarize ppc hcall counts and latencies. [Examples](tools/ppchcalls_example.txt).
 
 ##### CPU and Scheduler Tools
 
