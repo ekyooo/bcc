@@ -90,7 +90,6 @@ pair of .c and .py files, and some are directories of files.
 - tools/[capable](tools/capable.py): Trace security capability checks. [Examples](tools/capable_example.txt).
 - tools/[criticalstat](tools/criticalstat.py): Trace and report long atomic critical sections in the kernel. [Examples](tools/criticalstat_example.txt)
 - tools/[deadlock](tools/deadlock.py): Detect potential deadlocks on a running process. [Examples](tools/deadlock_example.txt).
-- tools/[funccount](tools/funccount.py): Count kernel function calls. [Examples](tools/funccount_example.txt).
 - tools/[inject](tools/inject.py): Targeted error injection with call chain and predicates [Examples](tools/inject_example.txt).
 - tools/[klockstat](tools/klockstat.py): Traces kernel mutex lock events and display locks statistics. [Examples](tools/klockstat_example.txt).
 - tools/[opensnoop](tools/opensnoop.py): Trace open() syscalls. [Examples](tools/opensnoop_example.txt).
@@ -99,7 +98,6 @@ pair of .c and .py files, and some are directories of files.
 - tools/[syncsnoop](tools/syncsnoop.py): Trace sync() syscall. [Examples](tools/syncsnoop_example.txt).
 - tools/[threadsnoop](tools/threadsnoop.py): List new thread creation. [Examples](tools/threadsnoop_example.txt).
 - tools/[tplist](tools/tplist.py): Display kernel tracepoints or USDT probes and their formats. [Examples](tools/tplist_example.txt).
-- tools/[trace](tools/trace.py): Trace arbitrary functions, with filters. [Examples](tools/trace_example.txt).
 - tools/[ttysnoop](tools/ttysnoop.py): Watch live output from a tty or pts device. [Examples](tools/ttysnoop_example.txt).
 
 ##### High-level Language Tools
@@ -146,9 +144,11 @@ pair of .c and .py files, and some are directories of files.
 
 ###### Function Performance Tools
 
+- tools/[funccount](tools/funccount.py): Count kernel function calls. [Examples](tools/funccount_example.txt).
 - tools/[funcinterval](tools/funcinterval.py): Time interval between the same function as a histogram. [Examples](tools/funcinterval_example.txt).
 - tools/[funclatency](tools/funclatency.py): Time functions and show their latency distribution. [Examples](tools/funclatency_example.txt).
 - tools/[funcslower](tools/funcslower.py): Trace slow kernel or user function calls. [Examples](tools/funcslower_example.txt).
+- tools/[trace](tools/trace.py): Trace arbitrary functions, with filters. [Examples](tools/trace_example.txt).
 
 ###### Interrupt and System Call Tools
 
