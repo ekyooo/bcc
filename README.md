@@ -52,6 +52,10 @@ See [INSTALL.md](INSTALL.md) for installation steps on your platform.
 
 See [FAQ.txt](FAQ.txt) for the most common troubleshoot questions.
 
+## Tool Requirements
+
+For detailed information about tool requirements including probe types, kernel configurations, and system dependencies, see [TOOL_REQUIREMENTS.md](TOOL_REQUIREMENTS.md).
+
 ## Reference guide
 
 See [docs/reference_guide.md](docs/reference_guide.md) for the reference guide to the bcc and bcc/BPF APIs.
