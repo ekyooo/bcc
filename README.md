@@ -177,26 +177,40 @@ pair of .c and .py files, and some are directories of files.
 
 ##### Network and Sockets Tools
 
+###### DNS and Host Resolution Tools
+
 - tools/[gethostlatency](tools/gethostlatency.py): Show latency for getaddrinfo/gethostbyname[2] calls. [Examples](tools/gethostlatency_example.txt).
+
+###### Socket and Connection Monitoring Tools
+
 - tools/[bindsnoop](tools/bindsnoop.py): Trace IPv4 and IPv6 bind() system calls (bind()). [Examples](tools/bindsnoop_example.txt).
-- tools/[netqtop](tools/netqtop.py) tools/[netqtop.c](tools/netqtop.c): Trace and display packets distribution on NIC queues. [Examples](tools/netqtop_example.txt).
 - tools/[sofdsnoop](tools/sofdsnoop.py): Trace FDs passed through unix sockets. [Examples](tools/sofdsnoop_example.txt).
 - tools/[solisten](tools/solisten.py): Trace TCP socket listen. [Examples](tools/solisten_example.txt).
 - tools/[sslsniff](tools/sslsniff.py): Sniff OpenSSL written and read data. [Examples](tools/sslsniff_example.txt).
+
+###### TCP Connection and State Tools
+
 - tools/[tcpaccept](tools/tcpaccept.py): Trace TCP passive connections (accept()). [Examples](tools/tcpaccept_example.txt).
 - tools/[tcpconnect](tools/tcpconnect.py): Trace TCP active connections (connect()). [Examples](tools/tcpconnect_example.txt).
 - tools/[tcpconnlat](tools/tcpconnlat.py): Trace TCP active connection latency (connect()). [Examples](tools/tcpconnlat_example.txt).
-- tools/[tcpdrop](tools/tcpdrop.py): Trace kernel-based TCP packet drops with details. [Examples](tools/tcpdrop_example.txt).
 - tools/[tcplife](tools/tcplife.py): Trace TCP sessions and summarize lifespan. [Examples](tools/tcplife_example.txt).
+- tools/[tcpstates](tools/tcpstates.py): Trace TCP session state changes with durations. [Examples](tools/tcpstates_example.txt).
+- tools/[tcptracer](tools/tcptracer.py): Trace TCP established connections (connect(), accept(), close()). [Examples](tools/tcptracer_example.txt).
+- tools/[tcpcong](tools/tcpcong.py): Trace TCP socket congestion control status duration. [Examples](tools/tcpcong_example.txt).
+
+###### TCP Performance and Traffic Analysis Tools
+
+- tools/[tcpdrop](tools/tcpdrop.py): Trace kernel-based TCP packet drops with details. [Examples](tools/tcpdrop_example.txt).
 - tools/[tcpretrans](tools/tcpretrans.py): Trace TCP retransmits and TLPs. [Examples](tools/tcpretrans_example.txt).
 - tools/[tcprtt](tools/tcprtt.py): Trace TCP round trip time. [Examples](tools/tcprtt_example.txt).
-- tools/[tcpstates](tools/tcpstates.py): Trace TCP session state changes with durations. [Examples](tools/tcpstates_example.txt).
 - tools/[tcpsubnet](tools/tcpsubnet.py): Summarize and aggregate TCP send by subnet. [Examples](tools/tcpsubnet_example.txt).
 - tools/[tcpsynbl](tools/tcpsynbl.py): Show TCP SYN backlog. [Examples](tools/tcpsynbl_example.txt).
 - tools/[tcptop](tools/tcptop.py): Summarize TCP send/recv throughput by host. Top for TCP. [Examples](tools/tcptop_example.txt).
-- tools/[tcptracer](tools/tcptracer.py): Trace TCP established connections (connect(), accept(), close()). [Examples](tools/tcptracer_example.txt).
-- tools/[tcpcong](tools/tcpcong.py): Trace TCP socket congestion control status duration. [Examples](tools/tcpcong_example.txt).
 - tools/[mptcpify](tools/mptcpify.py): Force applications to use MPTCP instead of TCP. [Examples](tools/mptcpify_example.txt).
+
+###### Network Interface and Queue Tools
+
+- tools/[netqtop](tools/netqtop.py) tools/[netqtop.c](tools/netqtop.c): Trace and display packets distribution on NIC queues. [Examples](tools/netqtop_example.txt).
 
 ##### Storage and Filesystems Tools
 
