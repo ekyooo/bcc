@@ -77,6 +77,33 @@ distributions, bpftool binary is checked in into BCC repository in bin/
 subdirectory. Once bpftool package is more widely available, this can be
 changed in favor of using pre-packaged version of bpftool.
 
+Cross-Compilation
+-----------------
+
+libbpf-tools can be cross-compiled from an x86\_64 host for other
+architectures such as aarch64 (arm64). This is useful for embedded Linux
+environments.
+
+**On Debian/Ubuntu**:
+
+```bash
+# Install cross-compilation dependencies (one-time)
+sudo dpkg --add-architecture arm64
+sudo apt-get update
+sudo apt-get install -y gcc-aarch64-linux-gnu
+sudo apt-get install -y libelf-dev:arm64 zlib1g-dev:arm64 libzstd-dev:arm64
+
+# Build all tools
+cd libbpf-tools
+make CROSS_COMPILE=aarch64-linux-gnu-
+
+# Static linking
+make profile CROSS_COMPILE=aarch64-linux-gnu- EXTRA_LDFLAGS+=-static
+```
+
+On Ubuntu, additional apt setup (ports repository) is needed.
+See [docs/cross\_compile\_libbpf\_tools.md](../docs/cross_compile_libbpf_tools.md)
+for full Ubuntu/Debian instructions and other distributions.
 
 Re-compiling your Kernel with CONFIG_DEBUG_INFO_BTF=y
 -----------------------------------------------------

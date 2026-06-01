@@ -17,11 +17,21 @@ BPFCFLAGS_softirqs := $(BPFCFLAGS) -mcpu=v3
 INSTALL ?= install
 prefix ?= /usr/local
 bindir := $(prefix)/bin
+ifeq ($(CROSS_COMPILE),)
 ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' | sed 's/aarch64/arm64/' \
 			 | sed 's/ppc64le/powerpc/' | sed 's/mips.*/mips/' \
 			 | sed 's/riscv64/riscv/' | sed 's/loongarch.*/loongarch/' \
 			 | sed 's/s390x/s390/')
+else
+ARCH ?= $(shell echo $(CROSS_COMPILE) | sed 's/-.*$$//' \
+			 | sed 's/aarch64/arm64/' | sed 's/x86_64/x86/' \
+			 | sed 's/ppc64le/powerpc/' | sed 's/mips.*/mips/' \
+			 | sed 's/riscv64/riscv/' | sed 's/loongarch.*/loongarch/' \
+			 | sed 's/s390x/s390/')
+endif
 BTFHUB_ARCHIVE ?= $(abspath btfhub-archive)
+
+ifeq ($(CROSS_COMPILE),)
 ifeq ($(ARCH),x86)
 CARGO ?= $(shell which cargo)
 ifeq ($(strip $(CARGO)),)
@@ -29,6 +39,10 @@ USE_BLAZESYM ?= 0
 else
 USE_BLAZESYM ?= 1
 endif
+endif
+else
+# Requires Rust cross toolchain.
+USE_BLAZESYM ?= 0
 endif
 
 ifeq ($(wildcard $(ARCH)/),)
@@ -132,7 +146,12 @@ define allow-override
     $(eval $(1) = $(2)))
 endef
 
-$(call allow-override,CC,$(CROSS_COMPILE)cc)
+ifeq ($(CROSS_COMPILE),)
+$(call allow-override,CC,cc)
+else
+# Cross-compiler packages provide <prefix>gcc, not <prefix>cc.
+$(call allow-override,CC,$(CROSS_COMPILE)gcc)
+endif
 $(call allow-override,LD,$(CROSS_COMPILE)ld)
 
 .PHONY: all
@@ -161,6 +180,11 @@ ifeq ($(USE_BLAZESYM),1)
 LDFLAGS += $(LIBBLAZESYM_OBJ) -lrt -lpthread -ldl
 endif
 
+LDLIBS := -lelf -lz
+ifneq ($(findstring -static,$(EXTRA_LDFLAGS)),)
+LDLIBS += -lzstd
+endif
+
 .PHONY: clean
 clean:
 	$(call msg,CLEAN)
@@ -187,7 +211,7 @@ $(BPFTOOL): | $(BPFTOOL_OUTPUT)
 
 $(APPS): %: $(OUTPUT)/%.o $(COMMON_OBJ) $(LIBBPF_OBJ) | $(OUTPUT)
 	$(call msg,BINARY,$@)
-	$(Q)$(CC) $(CFLAGS) $^ $(LDFLAGS) -lelf -lz -o $@
+	$(Q)$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 ifeq ($(USE_BLAZESYM),1)
 $(patsubst %,$(OUTPUT)/%.o,$(BZ_APPS)): $(OUTPUT)/blazesym.h
@@ -225,6 +249,7 @@ endif
 $(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch]) | $(OUTPUT)/libbpf
 	$(call msg,LIB,$@)
 	$(Q)$(MAKE) -C $(LIBBPF_SRC) BUILD_STATIC_ONLY=1		      \
+		    CC="$(CC)" LD="$(LD)"			      \
 		    OBJDIR=$(dir $@)libbpf DESTDIR=$(dir $@)		      \
 		    INCLUDEDIR= LIBDIR= UAPIDIR=			      \
 		    install
