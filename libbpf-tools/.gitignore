@@ -28,6 +28,7 @@
 /fsdist
 /fsslower
 /funclatency
+/functrace
 /fusedist
 /fuseslower
 /futexctn

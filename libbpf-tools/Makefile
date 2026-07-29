@@ -62,6 +62,7 @@ APPS = \
 	fsdist \
 	fsslower \
 	funclatency \
+	functrace \
 	gethostlatency \
 	hardirqs \
 	javagc \
@@ -98,6 +99,8 @@ APPS = \
 	wakeuptime \
 	$(BZ_APPS) \
 	#
+
+GENERIC_APPS := $(filter-out functrace,$(APPS))
 
 # export variables that are used in Makefile.btfgen as well.
 export OUTPUT BPFTOOL ARCH BTFHUB_ARCHIVE APPS
@@ -185,7 +188,12 @@ $(BPFTOOL): | $(BPFTOOL_OUTPUT)
 	$(call msg,BPFTOOL,$@)
 	$(Q)$(MAKE) ARCH= CROSS_COMPILE=  OUTPUT=$(BPFTOOL_OUTPUT)/ -C $(BPFTOOL_SRC) bootstrap
 
-$(APPS): %: $(OUTPUT)/%.o $(COMMON_OBJ) $(LIBBPF_OBJ) | $(OUTPUT)
+$(GENERIC_APPS): %: $(OUTPUT)/%.o $(COMMON_OBJ) $(LIBBPF_OBJ) | $(OUTPUT)
+	$(call msg,BINARY,$@)
+	$(Q)$(CC) $(CFLAGS) $^ $(LDFLAGS) -lelf -lz -o $@
+
+functrace: $(OUTPUT)/functrace.o $(OUTPUT)/functrace_text.o \
+	   $(COMMON_OBJ) $(LIBBPF_OBJ) | $(OUTPUT)
 	$(call msg,BINARY,$@)
 	$(Q)$(CC) $(CFLAGS) $^ $(LDFLAGS) -lelf -lz -o $@
 

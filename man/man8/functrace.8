@@ -1,0 +1,76 @@
+.TH functrace 8  "2026-09-22" "USER COMMANDS"
+.SH NAME
+functrace \- Trace userspace function calls and print call trees.
+.SH SYNOPSIS
+.B functrace \-b BINARY \-R ROOT \-f FUNC
+[\-f FUNC ...] [OPTIONS]
+.SH DESCRIPTION
+functrace attaches uprobes and uretprobes to selected userspace functions,
+records nested calls within a root-function transaction, and emits a
+human-readable call tree.
+.PP
+The root function is included in the trace boundary. Recursive or re-entrant
+root calls remain in the same trace and are represented as nested calls.
+.PP
+Since this uses BPF, only the root user can use this tool.
+.SH REQUIREMENTS
+CONFIG_BPF, BPF CO-RE BTF, and bcc. Linux 5.15 or newer is required for
+uprobe attach cookies. The BPF ring-buffer support used by this tool requires
+Linux 5.8 or newer.
+.SH OPTIONS
+.TP
+.B \-b BINARY, \-\-binary=BINARY
+Path to the binary containing the functions to trace.
+.TP
+.B \-R ROOT, \-\-root-func=ROOT
+Root function defining the transaction boundary. Required.
+.TP
+.B \-f FUNC, \-\-function=FUNC
+Function to trace. May be specified more than once.
+.TP
+.B \-p PID, \-\-pid=PID
+Trace only this process ID. A value of zero traces all processes.
+.TP
+.B \-o FILE, \-\-output=FILE
+Write output to FILE instead of standard output.
+.TP
+.B \-d SECONDS, \-\-duration=SECONDS
+Stop after SECONDS. Zero means run until interrupted.
+.TP
+.B \-D N, \-\-max-depth=N
+Maximum recorded call depth. The default is 64.
+.TP
+.B \-B BYTES, \-\-ringbuf-size=BYTES
+Set the BPF ring-buffer size. BYTES must be a power of two and at least one
+page; the default is 1048576.
+.TP
+.B \-v, \-\-verbose
+Print verbose setup and libbpf diagnostics.
+.SH EXAMPLES
+.TP
+Trace a root function and two children as a text call tree:
+.PP
+.EX
+functrace -b ./demo_app -R process_request -f process_request \\
+    -f parse_input -f validate
+.EE
+.SH OUTPUT
+Text mode buffers child spans until the root span returns so that each
+transaction is printed as one top-down block. Incomplete buffers are flushed
+when the tool exits.
+.SH OVERHEAD
+Tracing every selected function can produce a high event rate. Increase the
+ring-buffer size for bursty workloads and check the diagnostic counters for
+dropped events or depth overflows.
+.SH SOURCE
+This is from bcc.
+.IP
+https://github.com/iovisor/bcc
+.SH OS
+Linux
+.SH STABILITY
+Unstable - in development.
+.SH AUTHOR
+Eunseon Lee
+.SH SEE ALSO
+funclatency(8)
