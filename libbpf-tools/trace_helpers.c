@@ -1383,8 +1383,129 @@ static metric_print_fn_t print_functions[] = {
 };
 
 int print_metric(const struct metric *m, enum output_format fmt) {
-	if (fmt >= FORMAT_MAX)
+	if (fmt < FORMAT_LINE_PROTOCOL || fmt >= FORMAT_MAX)
 		return -EINVAL;
 
 	return print_functions[fmt - 1](m);
+}
+
+/* ── time_sync implementation ── */
+
+void sync_time(struct time_sync *sync)
+{
+	struct timespec mono, real;
+
+	clock_gettime(CLOCK_MONOTONIC, &mono);
+	clock_gettime(CLOCK_REALTIME, &real);
+	sync->monotonic_ns = (uint64_t)mono.tv_sec * 1000000000ULL
+			   + (uint64_t)mono.tv_nsec;
+	sync->realtime_ns  = (uint64_t)real.tv_sec * 1000000000ULL
+			   + (uint64_t)real.tv_nsec;
+}
+
+uint64_t convert_to_realtime_ns(uint64_t kernel_ns,
+				const struct time_sync *sync)
+{
+	if (kernel_ns >= sync->monotonic_ns)
+		return sync->realtime_ns + (kernel_ns - sync->monotonic_ns);
+	return sync->realtime_ns - (sync->monotonic_ns - kernel_ns);
+}
+
+/* ── OTLP span output implementation ── */
+
+static void print_json_escaped_string(FILE *fp, const char *value)
+{
+	const unsigned char *p = (const unsigned char *)value;
+
+	fputc('"', fp);
+	for (; p && *p; p++) {
+		switch (*p) {
+		case '"':
+			fputs("\\\"", fp);
+			break;
+		case '\\':
+			fputs("\\\\", fp);
+			break;
+		case '\b':
+			fputs("\\b", fp);
+			break;
+		case '\f':
+			fputs("\\f", fp);
+			break;
+		case '\n':
+			fputs("\\n", fp);
+			break;
+		case '\r':
+			fputs("\\r", fp);
+			break;
+		case '\t':
+			fputs("\\t", fp);
+			break;
+		default:
+			if (*p < 0x20)
+				fprintf(fp, "\\u%04x", *p);
+			else
+				fputc(*p, fp);
+			break;
+		}
+	}
+	fputc('"', fp);
+}
+
+int print_span(const struct span *s, enum trace_output_format fmt, FILE *fp)
+{
+	if (!s || fmt < 0 || fmt >= TRACE_FORMAT_MAX)
+		return -EINVAL;
+	if (!fp)
+		fp = stdout;
+
+	if (fmt == TRACE_FORMAT_OTEL_SPAN_JSON) {
+		/* Convert numeric IDs to hex strings at output time */
+		char trace_id_str[33];
+		char span_id_str[17];
+		char parent_span_id_str[17];
+
+		snprintf(trace_id_str, sizeof(trace_id_str),
+			 "%016llx%016llx",
+			 (unsigned long long)s->trace_id_hi,
+			 (unsigned long long)s->trace_id_lo);
+		snprintf(span_id_str, sizeof(span_id_str),
+			 "%016llx",
+			 (unsigned long long)s->span_id);
+		if (s->parent_span_id) {
+			snprintf(parent_span_id_str, sizeof(parent_span_id_str),
+				 "%016llx",
+				 (unsigned long long)s->parent_span_id);
+		} else {
+			parent_span_id_str[0] = '\0';
+		}
+
+		fprintf(fp,
+			"{\"traceId\":\"%s\","
+			"\"spanId\":\"%s\","
+			"\"parentSpanId\":\"%s\","
+			"\"name\":",
+			trace_id_str,
+			span_id_str,
+			parent_span_id_str);
+		print_json_escaped_string(fp, s->name);
+		fprintf(fp,
+			",\"kind\":%d,"
+			"\"startTimeUnixNano\":\"%llu\","
+			"\"endTimeUnixNano\":\"%llu\","
+			"\"status\":{\"code\":%d},"
+			"\"attributes\":["
+			"{\"key\":\"pid\",\"value\":{\"intValue\":\"%u\"}},"
+			"{\"key\":\"tid\",\"value\":{\"intValue\":\"%u\"}}"
+			"]}\n",
+			s->kind,
+			(unsigned long long)s->start_time_unix_nano,
+			(unsigned long long)s->end_time_unix_nano,
+			s->status_code,
+			s->pid, s->tid);
+	}
+
+	if (ferror(fp))
+		return -EIO;
+	return 0;
 }
