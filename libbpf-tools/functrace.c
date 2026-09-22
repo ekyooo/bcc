@@ -34,6 +34,7 @@ static struct env {
 	int               func_count;
 	char              output_file[OUTPUT_FILE_MAX];
 	char              binary[BINARY_PATH_MAX];
+	bool              otel;       /* true = -F otel (OTLP JSONL), false = text */
 	char              root_func[FUNC_NAME_LEN];
 	int               root_func_idx;  /* index in functions[], -1 if unset */
 	int               max_depth;
@@ -42,6 +43,7 @@ static struct env {
 	.duration       = 0,
 	.pid            = 0,
 	.func_count     = 0,
+	.otel           = false,
 	.root_func_idx  = -1,
 	.max_depth      = MAX_CALL_DEPTH,
 	.ringbuf_sz     = DEFAULT_RINGBUF_SIZE,
@@ -49,6 +51,7 @@ static struct env {
 
 static volatile sig_atomic_t exiting = 0;
 static FILE          *output_fp = NULL;
+static struct time_sync tsync;
 static volatile __u64 depth_overflows = 0;
 static volatile __u64 dropped_events = 0;
 static volatile __u64 thread_ctx_failures = 0;
@@ -65,6 +68,7 @@ static const char program_doc[] =
 "Examples:\n"
 "    functrace -b ./app -R my_func -f my_func           # text diagram\n"
 "    functrace -b ./app -R main -f main -f foo          # call tree\n"
+"    functrace -b ./app -R f1 -f f1 -F otel             # OTLP JSON\n"
 "    functrace -b ./app -R main -f main -d 10           # trace for 10s\n"
 ;
 
@@ -75,6 +79,7 @@ static const struct argp_option opts[] = {
 	{ 0, 0, 0, 0, "", 0 },
 	{ "pid",       'p', "PID",     0, "Trace only this PID (0 = all)",  0 },
 	{ "output",    'o', "FILE",    0, "Output file (default: stdout)",  0 },
+	{ "format",    'F', "FMT",     0, "Output format: otel (OTLP JSONL)", 0 },
 	{ "duration",  'd', "SECONDS", 0, "Trace duration (0 = until Ctrl-C)", 0 },
 	{ "max-depth", 'D', "N",       0, "Max call depth (default: 64)",   0 },
 	{ "ringbuf-size", 'B', "BYTES", 0, "Ring buffer size (default: 1048576)", 0 },
@@ -166,6 +171,14 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 		if (!copy_arg(env.output_file, sizeof(env.output_file), arg)) {
 			warn("Output path too long (max %d bytes)\n",
 				OUTPUT_FILE_MAX - 1);
+			argp_usage(state);
+		}
+		break;
+	case 'F':
+		if (strcmp(arg, "otel") == 0)
+			env.otel = true;
+		else {
+			warn("Unknown format '%s' (use 'otel')\n", arg);
 			argp_usage(state);
 		}
 		break;
@@ -307,9 +320,31 @@ static int handle_event(void *ctx, void *data, size_t data_sz)
 	if (e->func_idx < (uint32_t)env.func_count)
 		func_name = env.functions[e->func_idx];
 
-	text_handle_span(e, func_name, output_fp);
-	if (ferror(output_fp))
-		return -EIO;
+	if (env.otel) {
+		struct span s = {0};
+
+		s.trace_id_hi          = e->trace_id_hi;
+		s.trace_id_lo          = e->trace_id_lo;
+		s.span_id              = e->span_id;
+		s.parent_span_id       = e->parent_span_id;
+
+		snprintf(s.name, SPAN_NAME_LEN, "%s", func_name);
+		s.kind                = SPAN_KIND_INTERNAL;
+		s.start_time_unix_nano = convert_to_realtime_ns(e->start_ns,
+								&tsync);
+		s.end_time_unix_nano   = convert_to_realtime_ns(e->end_ns,
+								&tsync);
+		/* The probe observes completion, not the function's return value. */
+		s.status_code         = SPAN_STATUS_UNSET;
+		s.pid                 = e->pid;
+		s.tid                 = e->tid;
+
+		return print_span(&s, TRACE_FORMAT_OTEL_SPAN_JSON, output_fp);
+	} else {
+		text_handle_span(e, func_name, output_fp);
+		if (ferror(output_fp))
+			return -EIO;
+	}
 
 	return 0;
 }
@@ -361,6 +396,9 @@ int main(int argc, char **argv)
 		env.root_func_idx = env.func_count;
 		env.func_count++;
 	}
+
+	/* Snapshot clock reference before any events arrive */
+	sync_time(&tsync);
 
 	/* Initialise text output subsystem */
 	text_output_init();
@@ -478,6 +516,7 @@ int main(int argc, char **argv)
 
 	if (env.verbose) {
 		warn("Binary     : %s\n", env.binary);
+		warn("Format     : %s\n", env.otel ? "otel" : "text");
 		warn("Root func  : %s\n", env.root_func);
 		warn("Max depth  : %d\n", env.max_depth);
 		warn("Ringbuf    : %zu bytes\n", env.ringbuf_sz);
@@ -552,7 +591,8 @@ cleanup:
 		bpf_link__destroy(links[i]);
 	functrace_bpf__destroy(skel);
 	if (output_fp) {
-		text_output_flush_all(output_fp);
+		if (!env.otel)
+			text_output_flush_all(output_fp);
 		if (flush_output() && err == 0)
 			err = -EIO;
 	}

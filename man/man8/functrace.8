@@ -1,16 +1,21 @@
 .TH functrace 8  "2026-09-22" "USER COMMANDS"
 .SH NAME
-functrace \- Trace userspace function calls and print call trees.
+functrace \- Trace userspace function calls and print call-tree spans.
 .SH SYNOPSIS
 .B functrace \-b BINARY \-R ROOT \-f FUNC
 [\-f FUNC ...] [OPTIONS]
 .SH DESCRIPTION
 functrace attaches uprobes and uretprobes to selected userspace functions,
-records nested calls within a root-function transaction, and emits a
-human-readable call tree.
+records nested calls within a root-function transaction, and emits either a
+human-readable call tree or one OTLP Span JSON object per line.
+.PP
+The JSON mode emits a raw span stream, not a complete
+ExportTraceServiceRequest envelope. An OTLP exporter or adapter must group the
+span objects into an OTLP trace request before sending them to an OTLP/HTTP
+endpoint.
 .PP
 The root function is included in the trace boundary. Recursive or re-entrant
-root calls remain in the same trace and are represented as nested calls.
+root calls remain in the same trace and are represented as nested spans.
 .PP
 Since this uses BPF, only the root user can use this tool.
 .SH REQUIREMENTS
@@ -34,6 +39,9 @@ Trace only this process ID. A value of zero traces all processes.
 .B \-o FILE, \-\-output=FILE
 Write output to FILE instead of standard output.
 .TP
+.B \-F otel, \-\-format=otel
+Emit OTLP Span JSONL instead of the text call tree.
+.TP
 .B \-d SECONDS, \-\-duration=SECONDS
 Stop after SECONDS. Zero means run until interrupted.
 .TP
@@ -53,6 +61,13 @@ Trace a root function and two children as a text call tree:
 .EX
 functrace -b ./demo_app -R process_request -f process_request \\
     -f parse_input -f validate
+.EE
+.TP
+Emit raw OTLP Span JSONL for five seconds:
+.PP
+.EX
+functrace -b ./demo_app -R process_request -f process_request \\
+    -f parse_input -F otel -d 5
 .EE
 .SH OUTPUT
 Text mode buffers child spans until the root span returns so that each
