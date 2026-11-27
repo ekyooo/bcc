@@ -42,8 +42,36 @@ latency of the whole call tree. Each function line is indented with
 
 -R/--root-func (the "transaction boundary") is mandatory: functrace
 needs to know when a trace starts and ends in order to issue trace IDs
-and flush a block. Listing the root with -f is recommended for clarity;
-if omitted, functrace adds it to the traced function list with a warning.
+and flush a block. -R also traces the root function, so listing it again
+with -f is optional.
+
+
+Several binaries can be traced at once by repeating -b. Each -R and -f
+belongs to the most recent -b, so a root can be chosen in an executable,
+in a shared library, or in both. Here process_request in demo_app and
+usleep in libc are both roots. A root in a widely shared library such as
+libc matches every process using it, so -p limits it to one process:
+
+# ./functrace -p 1040717 -b ./demo_app -R process_request -f validate \
+    -b /lib/x86_64-linux-gnu/libc.so.6 -R usleep
+
+Tracing... Hit Ctrl-C to stop.
+[trace 8b54 | pid=1040717 tid=1040717 | start=+1.488s | total=10.38ms]
+process_request                             10.38ms
+  └─ usleep                                   0.49ms
+  └─ usleep                                   2.32ms
+  └─ validate                                 1.49ms
+    └─ usleep                                 1.47ms
+  └─ usleep                                   5.93ms
+
+[trace 433f | pid=1040717 tid=1040717 | start=+1.498s | total=100.17ms]
+usleep                                     100.17ms
+^C
+
+A root called inside another root's trace does not start a new trace; it
+becomes a child span of the outer trace. The usleep calls made by
+process_request are therefore children, while the usleep call in
+demo_app's main loop starts its own trace.
 
 
 The -p option filters on a single PID (filtered in-kernel), useful when
@@ -122,11 +150,12 @@ can drain them:
 # ./functrace -b ./demo_app -R process_request -f process_request \
     -f parse_input -f validate -f compute -D 8 -B 4194304 -v
 
-Binary     : ./demo_app
+Root function: process_request in ./demo_app (cookie=0)
 Format     : text
-Root func  : process_request
 Max depth  : 8
 Ringbuf    : 4194304 bytes
+Binary     : ./demo_app
+Root funcs : process_request
 Functions  : process_request parse_input validate compute
 PID        : all
 Tracing... Hit Ctrl-C to stop.
@@ -136,14 +165,23 @@ Tracing... Hit Ctrl-C to stop.
 USAGE message:
 
 # ./functrace --help
-Usage: functrace [OPTION...] -b BINARY -R ROOT -f FUNC [-f FUNC2 ...]
+Usage: functrace [OPTION...]
+            -b BINARY -R ROOT [-f FUNC ...] [-b BINARY2 [-R ROOT2] [-f FUNC2
+            ...]]
 Trace userspace function calls with call tree visualisation.
 
-USAGE: functrace [OPTIONS] -b BINARY -R ROOT -f FUNC [-f FUNC2 ...]
+USAGE: functrace [OPTIONS] -b BINARY -R ROOT [-f FUNC ...]
+                 [-b BINARY2 [-R ROOT2] [-f FUNC2 ...]]
 
-  -b, --binary=PATH          Path to binary with uprobes
-  -f, --function=FUNC        Function to trace (repeatable)
-  -R, --root-func=FUNC       Root function for trace boundary (required)
+Each -R and -f belongs to the most recent -b; options given before the
+first -b belong to the first -b. -R also traces the function. A root
+called inside another root's trace becomes a child span of that trace.
+
+  -b, --binary=PATH          Binary or shared library with uprobes
+                             (repeatable)
+  -f, --function=FUNC        Function to trace in the current -b (repeatable)
+  -R, --root-func=FUNC       Root function in the current -b (repeatable,
+                             required)
   -B, --ringbuf-size=BYTES   Ring buffer size (default: 1048576)
   -d, --duration=SECONDS     Trace duration (0 = until Ctrl-C)
   -D, --max-depth=N          Max call depth (default: 64)
@@ -164,5 +202,9 @@ Examples:
     functrace -b ./app -R main -f main -f foo          # call tree
     functrace -b ./app -R f1 -f f1 -F otel             # OTLP JSON
     functrace -b ./app -R main -f main -d 10           # trace for 10s
+    functrace -b ./app -R main \
+              -b /usr/lib/libfoo.so -f foo_init        # app + shared lib
+    functrace -b ./app -R main \
+              -b /usr/lib/libfoo.so -R foo_run         # root per binary
 
 Report bugs to https://github.com/iovisor/bcc/tree/master/libbpf-tools.

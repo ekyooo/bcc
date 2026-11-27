@@ -2,8 +2,8 @@
 .SH NAME
 functrace \- Trace userspace function calls and print call-tree spans.
 .SH SYNOPSIS
-.B functrace \-b BINARY \-R ROOT \-f FUNC
-[\-f FUNC ...] [OPTIONS]
+.B functrace \-b BINARY \-R ROOT
+[\-f FUNC ...] [\-b BINARY2 [\-R ROOT2] [\-f FUNC ...]] [OPTIONS]
 .SH DESCRIPTION
 functrace attaches uprobes and uretprobes to selected userspace functions,
 records nested calls within a root-function transaction, and emits either a
@@ -25,13 +25,23 @@ Linux 5.8 or newer.
 .SH OPTIONS
 .TP
 .B \-b BINARY, \-\-binary=BINARY
-Path to the binary containing the functions to trace.
+Path to an executable or shared library containing functions to trace. May be
+specified more than once. Each \-R and \-f belongs to the most recent \-b;
+\-R and \-f options given before the first \-b belong to the first \-b. All
+binaries share one trace context per thread, so calls from an executable into
+a traced shared-library function nest under the caller in the same trace.
 .TP
 .B \-R ROOT, \-\-root-func=ROOT
-Root function defining the transaction boundary. Required.
+Root function defining the transaction boundary, in the binary given by the
+most recent \-b. Required, and may be specified more than once. A root is
+also traced, so listing it again with \-f is optional. A function with the
+same name in another binary is not a root unless \-R names it there too. A
+root called while another root's trace is active does not start a new trace;
+it is recorded as a child span of the outer trace.
 .TP
 .B \-f FUNC, \-\-function=FUNC
-Function to trace. May be specified more than once.
+Function to trace in the binary given by the most recent \-b. May be
+specified more than once.
 .TP
 .B \-p PID, \-\-pid=PID
 Trace only this process ID. A value of zero traces all processes.
@@ -54,6 +64,12 @@ page; the default is 1048576.
 .TP
 .B \-v, \-\-verbose
 Print verbose setup and libbpf diagnostics.
+.SH EXIT STATUS
+functrace exits with status 0 on success. It exits with status 1 when \-b or
+\-R is missing or when tracing setup or output fails. Usage errors exit
+with status 64, including a \-b without any \-R or \-f, a repeated \-b path,
+a repeated \-f or \-R for the same function within a binary, and exceeding
+the binary or function count limit.
 .SH EXAMPLES
 .TP
 Trace a root function and two children as a text call tree:
@@ -61,6 +77,20 @@ Trace a root function and two children as a text call tree:
 .EX
 functrace -b ./demo_app -R process_request -f process_request \\
     -f parse_input -f validate
+.EE
+.TP
+Trace an executable function and a function in a shared library it links:
+.PP
+.EX
+functrace -p PID -b ./demo_app -R process_request \\
+    -b /lib/x86_64-linux-gnu/libc.so.6 -f usleep
+.EE
+.TP
+Use a root in each binary, so usleep calls outside process_request start their own traces:
+.PP
+.EX
+functrace -p PID -b ./demo_app -R process_request \\
+    -b /lib/x86_64-linux-gnu/libc.so.6 -R usleep
 .EE
 .TP
 Emit raw OTLP Span JSONL for five seconds:
