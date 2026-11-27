@@ -23,6 +23,7 @@
 #define warn(...) fprintf(stderr, __VA_ARGS__)
 
 #define MAX_FUNCTIONS   32
+#define MAX_BINARIES    16
 #define OUTPUT_FILE_MAX 256
 #define BINARY_PATH_MAX 256
 
@@ -31,12 +32,16 @@ static struct env {
 	int               duration;
 	pid_t             pid;
 	char              functions[MAX_FUNCTIONS][FUNC_NAME_LEN];
+	int               func_binary[MAX_FUNCTIONS]; /* index into binaries[]; -1 until first -b */
 	int               func_count;
 	char              output_file[OUTPUT_FILE_MAX];
-	char              binary[BINARY_PATH_MAX];
+	char              binaries[MAX_BINARIES][BINARY_PATH_MAX];
+	int               binary_count;
 	bool              otel;       /* true = -F otel (OTLP JSONL), false = text */
-	char              root_func[FUNC_NAME_LEN];
-	int               root_func_idx;  /* index in functions[], -1 if unset */
+	char              roots[MAX_FUNCTIONS][FUNC_NAME_LEN];
+	int               root_binary[MAX_FUNCTIONS]; /* like func_binary[] */
+	int               root_count;
+	bool              is_root[MAX_FUNCTIONS]; /* functions[i] given by -R */
 	int               max_depth;
 	size_t            ringbuf_sz; /* ring buffer size in bytes */
 } env = {
@@ -44,7 +49,6 @@ static struct env {
 	.pid            = 0,
 	.func_count     = 0,
 	.otel           = false,
-	.root_func_idx  = -1,
 	.max_depth      = MAX_CALL_DEPTH,
 	.ringbuf_sz     = DEFAULT_RINGBUF_SIZE,
 };
@@ -59,23 +63,36 @@ static volatile __u64 thread_ctx_failures = 0;
 const char *argp_program_version     = "functrace 0.1";
 const char *argp_program_bug_address =
 	"https://github.com/iovisor/bcc/tree/master/libbpf-tools";
-static const char args_doc[] = "-b BINARY -R ROOT -f FUNC [-f FUNC2 ...]";
+static const char args_doc[] =
+	"-b BINARY -R ROOT [-f FUNC ...] [-b BINARY2 [-R ROOT2] [-f FUNC2 ...]]";
 static const char program_doc[] =
 "Trace userspace function calls with call tree visualisation.\n"
 "\n"
-"USAGE: functrace [OPTIONS] -b BINARY -R ROOT -f FUNC [-f FUNC2 ...]\n"
+"USAGE: functrace [OPTIONS] -b BINARY -R ROOT [-f FUNC ...]\n"
+"                 [-b BINARY2 [-R ROOT2] [-f FUNC2 ...]]\n"
+"\n"
+"Each -R and -f belongs to the most recent -b; options given before the\n"
+"first -b belong to the first -b. -R also traces the function. A root\n"
+"called inside another root's trace becomes a child span of that trace.\n"
 "\v"
 "Examples:\n"
 "    functrace -b ./app -R my_func -f my_func           # text diagram\n"
 "    functrace -b ./app -R main -f main -f foo          # call tree\n"
 "    functrace -b ./app -R f1 -f f1 -F otel             # OTLP JSON\n"
 "    functrace -b ./app -R main -f main -d 10           # trace for 10s\n"
+"    functrace -b ./app -R main \\\n"
+"              -b /usr/lib/libfoo.so -f foo_init        # app + shared lib\n"
+"    functrace -b ./app -R main \\\n"
+"              -b /usr/lib/libfoo.so -R foo_run         # root per binary\n"
 ;
 
 static const struct argp_option opts[] = {
-	{ "function",  'f', "FUNC",    0, "Function to trace (repeatable)", 0 },
-	{ "binary",    'b', "PATH",    0, "Path to binary with uprobes",    0 },
-	{ "root-func", 'R', "FUNC",    0, "Root function for trace boundary (required)", 0 },
+	{ "function",  'f', "FUNC",    0,
+	  "Function to trace in the current -b (repeatable)", 0 },
+	{ "binary",    'b', "PATH",    0,
+	  "Binary or shared library with uprobes (repeatable)", 0 },
+	{ "root-func", 'R', "FUNC",    0,
+	  "Root function in the current -b (repeatable, required)", 0 },
 	{ 0, 0, 0, 0, "", 0 },
 	{ "pid",       'p', "PID",     0, "Trace only this PID (0 = all)",  0 },
 	{ "output",    'o', "FILE",    0, "Output file (default: stdout)",  0 },
@@ -135,30 +152,40 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 	long num;
 
 	switch (key) {
-	case 'f':
+	case 'f': {
+		int bin = env.binary_count - 1;
+
 		if (env.func_count >= MAX_FUNCTIONS) {
 			warn("Too many functions (max %d)\n", MAX_FUNCTIONS);
 			argp_usage(state);
-		}
-		for (int i = 0; i < env.func_count; i++) {
-			if (strcmp(env.functions[i], arg) == 0) {
-				warn("Function specified more than once: %s\n", arg);
-				argp_usage(state);
-			}
 		}
 		if (!copy_arg(env.functions[env.func_count], FUNC_NAME_LEN, arg)) {
 			warn("Function name too long (max %d bytes): %s\n",
 				FUNC_NAME_LEN - 1, arg);
 			argp_usage(state);
 		}
+		env.func_binary[env.func_count] = bin;
 		env.func_count++;
 		break;
+	}
 	case 'b':
-		if (!copy_arg(env.binary, sizeof(env.binary), arg)) {
+		if (env.binary_count >= MAX_BINARIES) {
+			warn("Too many binaries (max %d)\n", MAX_BINARIES);
+			argp_usage(state);
+		}
+		for (int i = 0; i < env.binary_count; i++) {
+			if (strcmp(env.binaries[i], arg) == 0) {
+				warn("Binary specified more than once: %s\n", arg);
+				argp_usage(state);
+			}
+		}
+		if (!copy_arg(env.binaries[env.binary_count],
+			      BINARY_PATH_MAX, arg)) {
 			warn("Binary path too long (max %d bytes)\n",
 				BINARY_PATH_MAX - 1);
 			argp_usage(state);
 		}
+		env.binary_count++;
 		break;
 	case 'p':
 		if (!parse_long_arg(arg, 0, INT_MAX, &num)) {
@@ -190,11 +217,17 @@ static error_t parse_arg(int key, char *arg, struct argp_state *state)
 		env.duration = num;
 		break;
 	case 'R':
-		if (!copy_arg(env.root_func, sizeof(env.root_func), arg)) {
+		if (env.root_count >= MAX_FUNCTIONS) {
+			warn("Too many root functions (max %d)\n", MAX_FUNCTIONS);
+			argp_usage(state);
+		}
+		if (!copy_arg(env.roots[env.root_count], FUNC_NAME_LEN, arg)) {
 			warn("Root function name too long (max %d bytes): %s\n",
 				FUNC_NAME_LEN - 1, arg);
 			argp_usage(state);
 		}
+		env.root_binary[env.root_count] = env.binary_count - 1;
+		env.root_count++;
 		break;
 	case 'D':
 		if (!parse_long_arg(arg, 1, MAX_CALL_DEPTH, &num)) {
@@ -362,39 +395,84 @@ int main(int argc, char **argv)
 	if (err)
 		return err;
 
-	if (env.func_count == 0) {
-		warn("Error: specify at least one function with -f\n");
-		return 1;
-	}
-	if (!env.binary[0]) {
+	if (env.binary_count == 0) {
 		warn("Error: specify the binary path with -b\n");
 		return 1;
 	}
 
 	/* --root-func is mandatory for trace boundary */
-	if (!env.root_func[0]) {
+	if (env.root_count == 0) {
 		warn("Error: -R/--root-func is required\n");
 		return 1;
 	}
 
-	/* Resolve root-func index */
+	/* -R and -f options given before the first -b belong to the first -b */
 	for (int i = 0; i < env.func_count; i++) {
-		if (strcmp(env.root_func, env.functions[i]) == 0) {
-			env.root_func_idx = i;
-			break;
+		if (env.func_binary[i] < 0)
+			env.func_binary[i] = 0;
+	}
+	for (int r = 0; r < env.root_count; r++) {
+		if (env.root_binary[r] < 0)
+			env.root_binary[r] = 0;
+	}
+	for (int i = 0; i < env.func_count; i++) {
+		for (int j = 0; j < i; j++) {
+			if (env.func_binary[i] == env.func_binary[j] &&
+			    strcmp(env.functions[i], env.functions[j]) == 0) {
+				warn("Function specified more than once for "
+				     "'%s': %s\n",
+				     env.binaries[env.func_binary[i]],
+				     env.functions[i]);
+				return argp_err_exit_status;
+			}
 		}
 	}
-	if (env.root_func_idx < 0) {
-		warn("Warning: --root-func '%s' not in -f list, "
-			"adding it automatically\n", env.root_func);
-		if (env.func_count >= MAX_FUNCTIONS) {
-			warn("Too many functions\n");
-			return 1;
+	for (int r = 0; r < env.root_count; r++) {
+		for (int s = 0; s < r; s++) {
+			if (env.root_binary[r] == env.root_binary[s] &&
+			    strcmp(env.roots[r], env.roots[s]) == 0) {
+				warn("Root function specified more than once for "
+				     "'%s': %s\n",
+				     env.binaries[env.root_binary[r]],
+				     env.roots[r]);
+				return argp_err_exit_status;
+			}
 		}
-		snprintf(env.functions[env.func_count], FUNC_NAME_LEN,
-			 "%s", env.root_func);
-		env.root_func_idx = env.func_count;
-		env.func_count++;
+	}
+
+	/* A root is also traced; reuse a matching -f in the same binary only */
+	for (int r = 0; r < env.root_count; r++) {
+		int i;
+
+		for (i = 0; i < env.func_count; i++) {
+			if (env.func_binary[i] == env.root_binary[r] &&
+			    strcmp(env.functions[i], env.roots[r]) == 0)
+				break;
+		}
+		if (i == env.func_count) {
+			if (env.func_count >= MAX_FUNCTIONS) {
+				warn("Too many functions (max %d)\n",
+				     MAX_FUNCTIONS);
+				return argp_err_exit_status;
+			}
+			snprintf(env.functions[i], FUNC_NAME_LEN, "%s",
+				 env.roots[r]);
+			env.func_binary[i] = env.root_binary[r];
+			env.func_count++;
+		}
+		env.is_root[i] = true;
+	}
+
+	for (int b = 0; b < env.binary_count; b++) {
+		bool used = false;
+
+		for (int i = 0; i < env.func_count && !used; i++)
+			used = env.func_binary[i] == b;
+		if (!used) {
+			warn("Error: no -R or -f function given for binary '%s'\n",
+			     env.binaries[b]);
+			return argp_err_exit_status;
+		}
 	}
 
 	/* Snapshot clock reference before any events arrive */
@@ -457,12 +535,14 @@ int main(int argc, char **argv)
 		links[link_count++] = thread_exit_link;
 	}
 
-	/* Populate root_funcs map if --root-func specified */
-	if (env.root_func_idx >= 0) {
-		uint64_t cookie = (uint64_t)env.root_func_idx;
+	/* Populate root_funcs map with every -R function */
+	for (int i = 0; i < env.func_count; i++) {
+		uint64_t cookie = (uint64_t)i;
 		uint8_t  one    = 1;
 		int rf_fd = bpf_map__fd(skel->maps.root_funcs);
 
+		if (!env.is_root[i])
+			continue;
 		err = bpf_map_update_elem(rf_fd, &cookie, &one, BPF_ANY);
 		if (err) {
 			warn("Failed to set root_funcs map: %s\n",
@@ -470,13 +550,15 @@ int main(int argc, char **argv)
 			goto cleanup;
 		}
 		if (env.verbose)
-			warn("Root function: %s (cookie=%llu)\n",
-				env.root_func,
+			warn("Root function: %s in %s (cookie=%llu)\n",
+				env.functions[i],
+				env.binaries[env.func_binary[i]],
 				(unsigned long long)cookie);
 	}
 
-	/* Attach uprobes for each function */
+	/* Attach uprobes for each function in its own binary */
 	for (int i = 0; i < env.func_count; i++) {
+		const char *binary = env.binaries[env.func_binary[i]];
 		LIBBPF_OPTS(bpf_uprobe_opts, uprobe_opts,
 			.func_name = env.functions[i],
 			.retprobe  = false,
@@ -486,11 +568,11 @@ int main(int argc, char **argv)
 			bpf_program__attach_uprobe_opts(
 				skel->progs.trace_func_entry,
 				env.pid ? env.pid : -1,
-				env.binary, 0, &uprobe_opts);
+				binary, 0, &uprobe_opts);
 		err = libbpf_get_error(entry_link);
 		if (err) {
-			warn("Failed to attach uprobe for '%s': %s\n",
-				env.functions[i], strerror(-err));
+			warn("Failed to attach uprobe for '%s' in '%s': %s\n",
+				env.functions[i], binary, strerror(-err));
 			goto cleanup;
 		}
 		links[link_count++] = entry_link;
@@ -504,26 +586,39 @@ int main(int argc, char **argv)
 			bpf_program__attach_uprobe_opts(
 				skel->progs.trace_func_exit,
 				env.pid ? env.pid : -1,
-				env.binary, 0, &uretprobe_opts);
+				binary, 0, &uretprobe_opts);
 		err = libbpf_get_error(exit_link);
 		if (err) {
-			warn("Failed to attach uretprobe for '%s': %s\n",
-				env.functions[i], strerror(-err));
+			warn("Failed to attach uretprobe for '%s' in '%s': %s\n",
+				env.functions[i], binary, strerror(-err));
 			goto cleanup;
 		}
 		links[link_count++] = exit_link;
 	}
 
 	if (env.verbose) {
-		warn("Binary     : %s\n", env.binary);
 		warn("Format     : %s\n", env.otel ? "otel" : "text");
-		warn("Root func  : %s\n", env.root_func);
 		warn("Max depth  : %d\n", env.max_depth);
 		warn("Ringbuf    : %zu bytes\n", env.ringbuf_sz);
-		warn("Functions  :");
-		for (int i = 0; i < env.func_count; i++)
-			warn(" %s", env.functions[i]);
-		warn("\n");
+		for (int b = 0; b < env.binary_count; b++) {
+			bool has_root = false;
+
+			warn("Binary     : %s\n", env.binaries[b]);
+			warn("Root funcs :");
+			for (int i = 0; i < env.func_count; i++) {
+				if (env.func_binary[i] == b && env.is_root[i]) {
+					warn(" %s", env.functions[i]);
+					has_root = true;
+				}
+			}
+			warn("%s\n", has_root ? "" : " (none)");
+			warn("Functions  :");
+			for (int i = 0; i < env.func_count; i++) {
+				if (env.func_binary[i] == b)
+					warn(" %s", env.functions[i]);
+			}
+			warn("\n");
+		}
 		if (env.pid)
 			warn("PID        : %u\n", env.pid);
 		else
